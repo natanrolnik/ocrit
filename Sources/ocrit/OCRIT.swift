@@ -2,6 +2,7 @@ import Foundation
 import ArgumentParser
 import UniformTypeIdentifiers
 import class Vision.VNRecognizeTextRequest
+import PathKit
 
 struct Failure: LocalizedError, CustomStringConvertible {
     var errorDescription: String?
@@ -11,35 +12,36 @@ struct Failure: LocalizedError, CustomStringConvertible {
 
 @main
 struct ocrit: AsyncParsableCommand {
-    
     @Argument(help: "Path or list of paths for the images")
     var imagePaths: [String]
     
-    @Option(name: .shortAndLong, help: "Path to a directory where the txt files will be written to, or - for standard output")
-    var output: String = "-"
-    
+    @Option(
+        name: .shortAndLong,
+        help: "Path to a directory where the txt files will be written to, or - for standard output",
+        transform: { Path($0) }
+    )
+    var output: Path?
+
     @Option(name: .shortAndLong, help: "Language code to use for the recognition, can be repeated to select multiple languages")
     var language: [String] = []
 
     @Flag(name: .shortAndLong, help: "Uses an OCR algorithm that prioritizes speed over accuracy")
     var fast = false
 
-    private var shouldOutputToStdout: Bool { output == "-" }
+    private var shouldOutputToStdout: Bool { output == nil }
 
-    func run() async throws {
-        let outputDirectoryURL = URL(fileUrlWithTildePath: output)
-
-        if !shouldOutputToStdout {
-            guard outputDirectoryURL.isExistingDirectory else {
-                throw Failure("Output path doesn't exist (or is not a directory) at \(output)")
-            }
+    func validate() throws {
+        if let output, !output.isDirectory {
+            throw ValidationError("Output path doesn't exist (or is not a directory) at \(output)")
         }
 
         /// Validate languages before attempting any OCR operations so that we can exit early in case there's an unsupported language.
         try VNRecognizeTextRequest.validateLanguages(with: language)
+    }
 
-        let imageURLs = imagePaths.map(URL.init(fileUrlWithTildePath:))
-        
+    func run() async throws {
+        let imageURLs = imagePaths.map { Path($0).absolute().url }
+
         fputs("Validating images…\n", stderr)
 
         var operationType: OCROperation.Type = ImageOCROperation.self
@@ -81,7 +83,7 @@ struct ocrit: AsyncParsableCommand {
 
             do {
                 for try await result in try operation.run(fast: fast) {
-                    try writeResult(result, for: url, outputDirectoryURL: outputDirectoryURL)
+                    try writeResult(result, for: url)
                 }
             } catch {
                 /// Exit with error if there's only one image, otherwise we won't interrupt execution and will keep trying the other ones.
@@ -94,13 +96,18 @@ struct ocrit: AsyncParsableCommand {
         }
     }
     
-    private func writeResult(_ result: OCRResult, for imageURL: URL, outputDirectoryURL: URL) throws {
+    private func writeResult(_ result: OCRResult, for imageURL: URL) throws {
         guard !shouldOutputToStdout else {
             print(imageURL.lastPathComponent + ":")
             print(result.text + "\n")
             return
         }
-        
+
+        guard let output else {
+            return
+        }
+
+        let outputDirectoryURL = output.absolute().url
         var outputFileURL = outputDirectoryURL
             .appendingPathComponent(result.suggestedFilename)
             .appendingPathExtension("txt")
@@ -113,27 +120,4 @@ struct ocrit: AsyncParsableCommand {
         }
     }
     
-}
-
-extension URL {
-    var isExistingDirectory: Bool {
-        var dirCheck = ObjCBool(false)
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &dirCheck) else { return false }
-        return dirCheck.boolValue
-    }
-    
-    init(fileUrlWithTildePath: String) {
-        let tildeExpanded = fileUrlWithTildePath.exapnadingTildeInPath
-        let currentDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        
-        self.init(fileURLWithPath: tildeExpanded, relativeTo: currentDirectory)
-    }
-}
-
-extension String {
-    var exapnadingTildeInPath: String {
-        let ns = NSString(string: self)
-        let expanded = ns.expandingTildeInPath
-        return String(expanded)
-    }
 }

@@ -68,6 +68,8 @@ final class CGImageOCR {
 
 }
 
+import ArgumentParser
+
 extension VNRecognizeTextRequest {
     @discardableResult
     static func validateLanguages(with customLanguages: [String]) throws -> [String]? {
@@ -82,7 +84,7 @@ extension VNRecognizeTextRequest {
 
         for customLanguage in customLanguages {
             guard supportedLanguages.contains(customLanguage) else {
-                throw Failure("Unsupported language \"\(customLanguage)\". Supported languages are: \(supportedLanguages.joined(separator: ", "))")
+                throw ValidationError("Unsupported language \"\(customLanguage)\". Supported languages are: \(supportedLanguages.joined(separator: ", "))")
             }
         }
 
