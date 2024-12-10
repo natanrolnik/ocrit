@@ -13,14 +13,13 @@ struct Failure: LocalizedError, CustomStringConvertible {
 @main
 struct ocrit: AsyncParsableCommand {
     @Argument(help: "Path or list of paths for the images")
-    var imagePaths: [String]
-    
+    var imagePaths: [Path]
+
     @Option(
         name: .shortAndLong,
-        help: "Path to a directory where the txt files will be written to, or - for standard output",
-        transform: { Path($0) }
+        help: "Path to a directory where the txt files will be written to, or - for standard output"
     )
-    var output: Path?
+    var output: Output = .stdOutput
 
     @Option(name: .shortAndLong, help: "Language code to use for the recognition, can be repeated to select multiple languages")
     var language: [String] = []
@@ -28,10 +27,8 @@ struct ocrit: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Uses an OCR algorithm that prioritizes speed over accuracy")
     var fast = false
 
-    private var shouldOutputToStdout: Bool { output == nil }
-
     func validate() throws {
-        if let output, !output.isDirectory {
+        if let path = output.path, !path.isDirectory {
             throw ValidationError("Output path doesn't exist (or is not a directory) at \(output)")
         }
 
@@ -40,7 +37,7 @@ struct ocrit: AsyncParsableCommand {
     }
 
     func run() async throws {
-        let imageURLs = imagePaths.map { Path($0).absolute().url }
+        let imageURLs = imagePaths.map(\.url)
 
         fputs("Validating images…\n", stderr)
 
@@ -97,17 +94,12 @@ struct ocrit: AsyncParsableCommand {
     }
     
     private func writeResult(_ result: OCRResult, for imageURL: URL) throws {
-        guard !shouldOutputToStdout else {
+        guard let outputDirectoryURL = output.path?.url else {
             print(imageURL.lastPathComponent + ":")
             print(result.text + "\n")
             return
         }
 
-        guard let output else {
-            return
-        }
-
-        let outputDirectoryURL = output.absolute().url
         var outputFileURL = outputDirectoryURL
             .appendingPathComponent(result.suggestedFilename)
             .appendingPathExtension("txt")
